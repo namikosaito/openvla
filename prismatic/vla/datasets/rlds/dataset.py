@@ -53,6 +53,7 @@ def make_dataset_from_rlds(
     action_normalization_mask: Optional[List[bool]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
+    load_all_data_for_training: bool = True,
 ) -> Tuple[dl.DLataset, dict]:
     """
     This function is responsible for loading a specific RLDS dataset from storage and getting it into a standardized
@@ -235,6 +236,8 @@ def make_dataset_from_rlds(
         split = "train[:95%]" if train else "train[95%:]"
     else:
         split = "train" if train else "val"
+    if load_all_data_for_training and train:
+        split = "train"
 
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads)
 
@@ -266,6 +269,7 @@ def apply_trajectory_transforms(
     task_augment_strategy: Optional[str] = None,
     task_augment_kwargs: dict = {},
     num_parallel_calls: int = tf.data.AUTOTUNE,
+    dataset_statistics: Optional[Union[dict, str]] = None,
 ) -> dl.DLataset:
     """
     Applies common transforms that happen at a trajectory level. Such transforms are usually some sort of "relabeling"
@@ -338,6 +342,7 @@ def apply_trajectory_transforms(
             traj_transforms.chunk_act_obs,
             window_size=window_size,
             future_action_window_size=future_action_window_size,
+            dataset_statistics = dataset_statistics,
         ),
         num_parallel_calls,
     )
@@ -466,6 +471,7 @@ def make_interleaved_dataset(
     balance_weights: bool = False,
     traj_transform_threads: Optional[int] = None,
     traj_read_threads: Optional[int] = None,
+    load_all_data_for_training: bool = True,
 ) -> dl.DLataset:
     """
     Creates an interleaved dataset from list of dataset configs (kwargs). Returns a dataset of batched frames.
@@ -507,7 +513,7 @@ def make_interleaved_dataset(
         data_kwargs = copy.deepcopy(dataset_kwargs)
         if "dataset_frame_transform_kwargs" in data_kwargs:
             data_kwargs.pop("dataset_frame_transform_kwargs")
-        _, dataset_statistics = make_dataset_from_rlds(**data_kwargs, train=train)
+        _, dataset_statistics = make_dataset_from_rlds(**data_kwargs, train=train, load_all_data_for_training=load_all_data_for_training)
         dataset_sizes.append(dataset_statistics["num_transitions"])
         all_dataset_statistics[dataset_kwargs["name"]] = dataset_statistics
 
@@ -550,11 +556,13 @@ def make_interleaved_dataset(
             num_parallel_calls=threads,
             num_parallel_reads=reads,
             dataset_statistics=all_dataset_statistics[dataset_kwargs["name"]],
+            load_all_data_for_training=load_all_data_for_training,
         )
         dataset = apply_trajectory_transforms(
             dataset.repeat(),
             **traj_transform_kwargs,
             num_parallel_calls=threads,
+            dataset_statistics=all_dataset_statistics[dataset_kwargs["name"]],
             train=train,
         ).flatten(num_parallel_calls=threads)
         dataset = apply_per_dataset_frame_transforms(dataset, **dataset_frame_transform_kwargs)

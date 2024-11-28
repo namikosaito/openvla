@@ -6,12 +6,12 @@ that represents a single trajectory, meaning each tensor has the same leading di
 """
 
 import logging
-from typing import Dict
+from typing import Dict, Optional, Union
 
 import tensorflow as tf
 
 
-def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int = 0) -> Dict:
+def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int = 0, dataset_statistics: Optional[Union[dict, str]] = None) -> Dict:
     """
     Chunks actions and observations into the given window_size.
 
@@ -22,11 +22,15 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
     indicates whether an observation should be considered padding (i.e. if it had come from a timestep
     before the start of the trajectory).
     """
+
     traj_len = tf.shape(traj["action"])[0]
     action_dim = traj["action"].shape[-1]
+    
+    # chunk_indices = tf.broadcast_to(tf.range(-window_size + 1, 1), [traj_len, window_size]) + tf.broadcast_to(
+    #     tf.range(traj_len)[:, None], [traj_len, window_size]
+    # )
     chunk_indices = tf.broadcast_to(tf.range(-window_size + 1, 1), [traj_len, window_size]) + tf.broadcast_to(
-        tf.range(traj_len)[:, None], [traj_len, window_size]
-    )
+        tf.range(traj_len)[:, None], [traj_len, window_size])
 
     action_chunk_indices = tf.broadcast_to(
         tf.range(-window_size + 1, 1 + future_action_window_size),
@@ -58,16 +62,32 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
             "Assuming all actions are relative for the purpose of making neutral actions."
         )
     absolute_action_mask = traj.get("absolute_action_mask", tf.zeros([traj_len, action_dim], dtype=tf.bool))
-    neutral_actions = tf.where(
-        absolute_action_mask[:, None, :],
-        traj["action"],  # absolute actions are repeated (already done during chunking)
-        tf.zeros_like(traj["action"]),  # relative actions are zeroed
-    )
+    
 
-    # actions past the goal timestep become neutral
+    # Note that the neutral_acitons is not zero, but should be zero after unnormalization instead.
+    # hard code NormalizationType.BOUNDS_Q99 for neutral_actions now.
+    low = dataset_statistics["action"]["q01"]
+    high = dataset_statistics["action"]["q99"]
+    norm_zero_action = 2 * (0 - low) / (high - low + 1e-8) - 1
+    expanded_norm_zero_action = tf.broadcast_to(norm_zero_action, tf.shape(traj["action"]))  
+    expanded_norm_zero_action = tf.cast(expanded_norm_zero_action, dtype=traj["action"].dtype)
+    
+    neutral_actions = tf.where(absolute_action_mask[:, None, :], traj["action"], expanded_norm_zero_action)
+    
+    # neutral_actions = tf.where(
+    #     absolute_action_mask[:, None, :],
+    #     traj["action"],  # absolute actions are repeated (already done during chunking)
+    #     tf.zeros_like(traj["action"]),  # relative actions are zeroed
+    # )
+
+    # actions past the goal timestep or before the start timestep should become neutral
     action_past_goal = action_chunk_indices > goal_timestep[:, None]
+    action_before_start = action_chunk_indices < 0
     traj["action"] = tf.where(action_past_goal[:, :, None], neutral_actions, traj["action"])
-
+    traj["action"] = tf.where(action_before_start[:, :, None], neutral_actions, traj["action"])
+    floored_action_chunk_indices_for_masking = tf.minimum(tf.maximum(action_chunk_indices, 0), goal_timestep[:, None]+5)
+    traj["action_mask"] = action_chunk_indices == floored_action_chunk_indices_for_masking
+    
     return traj
 
 

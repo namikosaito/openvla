@@ -131,11 +131,19 @@ class PaddedCollatorForActionPrediction:
         else:
             raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values)}")
 
+        # Adding continuous actions and batch processing.
+        actions = [instance["actions"] for instance in instances]
+        actions = torch.stack(actions)
+        action_masks = [instance["action_masks"] for instance in instances]
+        action_masks = torch.stack(action_masks)
+
         output = dict(
             pixel_values=pixel_values,
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,
+            actions=actions,
+            action_masks=action_masks,
         )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names

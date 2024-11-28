@@ -641,4 +641,13 @@ OXE_DATASET_CONFIGS = {
         "state_encoding": StateEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+
+    ### Custom Finetuning Datasets
+    "custom_finetuning": {
+        "image_obs_keys": {"primary": "image", "secondary": None, "wrist": None},
+        "depth_obs_keys": {"primary": "depth", "secondary": None, "wrist": None},
+        "state_obs_keys": ["base_pose_tool_reached", "gripper_closed"],
+        "state_encoding": StateEncoding.POS_QUAT,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
 }

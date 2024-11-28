@@ -38,15 +38,32 @@ class RLDSBatchTransform:
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
         """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
         dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
+        
+        # For future action predictions
+        if rlds_batch["action"].shape[0] > 1:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"]
+        else:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
+
         img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
 
-        # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
+        # Construct Chat-based Prompt
         prompt_builder = self.prompt_builder_fn("openvla")
-        conversation = [
-            {"from": "human", "value": f"What action should the robot take to {lang}?"},
-            {"from": "gpt", "value": self.action_tokenizer(action)},
-        ]
+
+        # If action tokenizer is not used, we don't add the action to the chat answer
+        if self.action_tokenizer is None:
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {lang}?"},
+                {"from": "gpt", "value": ""},
+            ]
+        else:
+            # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {lang}?"},
+                {"from": "gpt", "value": self.action_tokenizer(action)},
+            ]
+
         for turn in conversation:
             prompt_builder.add_turn(turn["from"], turn["value"])
 
@@ -59,12 +76,23 @@ class RLDSBatchTransform:
         input_ids, labels = torch.tensor(input_ids), torch.tensor(labels)
         pixel_values = self.image_transform(img)
 
-        # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
-        labels[: -(len(action) + 1)] = IGNORE_INDEX
+        # Add future actions to batch
+        if rlds_batch["action"].shape[0] > 1:
+            action = torch.tensor(action, dtype=torch.float32)
+            action_mask = None
+            if "action_mask" in rlds_batch:
+                action_mask = torch.tensor(rlds_batch["action_mask"], dtype=torch.bool)
+
+        if self.action_tokenizer is None:
+            labels[: -1] = IGNORE_INDEX
+        else:
+            # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
+            labels[: -(len(action) + 1)] = IGNORE_INDEX
+
         if not self.predict_stop_token:
             labels[-1] = IGNORE_INDEX
 
-        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name)
+        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
 
 
 class RLDSDataset(IterableDataset):
@@ -75,8 +103,11 @@ class RLDSDataset(IterableDataset):
         batch_transform: RLDSBatchTransform,
         resize_resolution: Tuple[int, int],
         shuffle_buffer_size: int = 256_000,
+        future_action_window_size: int = 0,
+        past_action_window_size: int = 0,
         train: bool = True,
         image_aug: bool = False,
+        load_all_data_for_training: bool = True,
     ) -> None:
         """Lightweight wrapper around RLDS TFDS Pipeline for use with PyTorch/OpenVLA Data Loaders."""
         self.data_root_dir, self.data_mix, self.batch_transform = data_root_dir, data_mix, batch_transform
@@ -100,10 +131,10 @@ class RLDSDataset(IterableDataset):
         )
         rlds_config = dict(
             traj_transform_kwargs=dict(
-                window_size=1,                                      # If we wanted to feed / predict more than one step
-                future_action_window_size=0,                        # For action chunking
-                skip_unlabeled=True,                                # Skip trajectories without language labels
-                goal_relabeling_strategy="uniform",                 # Goals are currently unused
+                window_size=past_action_window_size + 1,                                    # If we wanted to feed / predict more than one step
+                future_action_window_size=future_action_window_size,                        # For action chunking
+                skip_unlabeled=True,                                                        # Skip trajectories without language labels
+                #goal_relabeling_strategy="uniform",                                        # Goals are currently unused
             ),
             frame_transform_kwargs=dict(
                 resize_size=resize_resolution,
@@ -116,6 +147,7 @@ class RLDSDataset(IterableDataset):
             traj_transform_threads=len(mixture_spec),
             traj_read_threads=len(mixture_spec),
             train=train,
+            load_all_data_for_training=load_all_data_for_training,
         )
 
         # If applicable, enable image augmentations
@@ -166,6 +198,7 @@ class EpisodicRLDSDataset(RLDSDataset):
             train=rlds_config["train"],
             traj_transform_kwargs=rlds_config["traj_transform_kwargs"],
             frame_transform_kwargs=rlds_config["frame_transform_kwargs"],
+            load_all_data_for_training=rlds_config["load_all_data_for_training"],
         )
 
     def __iter__(self) -> Dict[str, Any]:
