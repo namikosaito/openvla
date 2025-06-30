@@ -168,6 +168,18 @@ OXE_NAMED_MIXTURES: Dict[str, List[Tuple[str, float]]] = {
         # ("droid", 0.06),
     ],
 
+    "single_dataset": [
+        ("austin_buds_dataset_converted_externally_to_rlds", 1.0),
+    ],
+
+    "own_dataset": [
+        ("own_dataset", 1.0),
+    ],
+
+    "own_dataset_200": [
+        ("own_dataset_200", 1.0),
+    ],
+
     # === T-DROID Dataset ===
     "tdroid_carrot_in_bowl": [
         ("tdroid_carrot_in_bowl", 1.0),
@@ -194,6 +206,12 @@ OXE_NAMED_MIXTURES: Dict[str, List[Tuple[str, float]]] = {
     ],
 
     # === Custom Finetuning Datasets ===
+    "own_dataset": [
+        ("own_dataset", 1.0),
+    ],
+    "own_dataset_200": [
+        ("own_dataset_200", 1.0),
+    ],
     "custom_finetuning": [
         ("custom_finetuning", 1.0),
     ],
