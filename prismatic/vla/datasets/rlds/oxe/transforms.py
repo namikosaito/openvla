@@ -826,6 +826,13 @@ def tdroid_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 def identity_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     return trajectory
 
+
+def own_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    return trajectory
+
+def own_dataset_200_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    return trajectory
+
 # === Registry ===
 OXE_STANDARDIZATION_TRANSFORMS = {
     "bridge_oxe": bridge_oxe_dataset_transform,
@@ -900,5 +907,7 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     ### DROID Finetuning datasets
     "droid_wipe": droid_finetuning_transform,
     ### custom Finetuning datasets
+    "own_dataset": own_dataset_transform,
+    "own_dataset_200": own_dataset_200_transform,
     "custom_finetuning": identity_transform,
 }
